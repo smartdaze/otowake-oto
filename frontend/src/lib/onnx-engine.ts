@@ -33,13 +33,15 @@ export interface SeparationResult {
 // WASM ファイルのパスを明示的に指定（Vercel等でバンドルパスと異なる場合の対策）
 ort.env.wasm.wasmPaths = '/';
 
+// proxy: true はバンドル全体を Worker に読み込むため、
+// React 等の DOM コードが Worker 内で document を参照してエラーになる。
+// proxy を使わず、numThreads のみでマルチスレッド WASM 演算を行う。
+ort.env.wasm.proxy = false;
+
 if (typeof SharedArrayBuffer !== 'undefined') {
   ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
-  ort.env.wasm.proxy = true;
 } else {
-  // COOP/COEP ヘッダーがない環境では SharedArrayBuffer が使えないためシングルスレッド
   ort.env.wasm.numThreads = 1;
-  ort.env.wasm.proxy = false;
 }
 
 /* ================================================================ */
