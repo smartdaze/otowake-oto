@@ -7,7 +7,7 @@ export default defineConfig({
     headers: {
       // SharedArrayBuffer (ONNX Runtime WASM マルチスレッド) に必要
       'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     },
   },
   optimizeDeps: {

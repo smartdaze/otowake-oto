@@ -58,14 +58,15 @@ export class OnnxSeparator {
     this.dispose();
     this.config = config;
 
-    const modelUrl = `/models/${config.modelFile}`;
+    // GitHub Releases から直接ダウンロード（Vercelの静的ファイルサイズ制限を回避）
+    const GITHUB_RELEASE_BASE = 'https://github.com/smartdaze/otowake-oto/releases/download/models-v1';
+    const modelUrl = `${GITHUB_RELEASE_BASE}/${config.modelFile}`;
     onProgress?.(0, 'モデルをダウンロード中...');
 
     const response = await fetch(modelUrl);
     if (!response.ok) {
       throw new Error(
-        `モデルファイルが見つかりません: /models/${config.modelFile}\n` +
-        'tools/export_onnx.py でモデルを変換し、public/models/ に配置してください。',
+        `モデルのダウンロードに失敗しました: ${config.modelFile} (HTTP ${response.status})`,
       );
     }
 
