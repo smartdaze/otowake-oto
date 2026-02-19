@@ -44,6 +44,11 @@ if (typeof SharedArrayBuffer !== 'undefined') {
   ort.env.wasm.numThreads = 1;
 }
 
+/* ---- 定数 ---- */
+
+/** Demucs apply_model の shifts パラメータ相当。ランダムシフト推論の回数。 */
+const SHIFTS = 1;
+
 /* ================================================================ */
 
 export class OnnxSeparator {
@@ -128,147 +133,98 @@ export class OnnxSeparator {
     const cfg = this.config;
     const sr = cfg.sampleRate;
     const numSources = cfg.stems.length;
-    const segmentLength = Math.round(cfg.segment * sr);
-    const overlap = 0.25;
-    const stride = Math.round((1 - overlap) * segmentLength);
 
-    // STFT パラメータ (メタデータから取得、または計算)
     const specParams: SpecParams = {
       nfft: cfg.nfft ?? 4096,
       hopLength: cfg.hopLength ?? 1024,
       numFreqBins: cfg.numFreqBins ?? 2048,
-      specTimeFrames: cfg.specTimeFrames ?? Math.ceil(segmentLength / (cfg.hopLength ?? 1024)),
+      specTimeFrames: cfg.specTimeFrames ?? Math.ceil(length / (cfg.hopLength ?? 1024)),
       specPad: cfg.specPad ?? ((cfg.hopLength ?? 1024) / 2 * 3),
     };
 
     onProgress?.(5, '音声データを準備中...');
 
-    // テント窓
-    const weight = new Float32Array(segmentLength);
-    const half = Math.floor(segmentLength / 2);
-    for (let i = 0; i < half; i++) weight[i] = (i + 1) / half;
-    for (let i = half; i < segmentLength; i++) weight[i] = (segmentLength - i) / (segmentLength - half);
+    let output: Float32Array;
 
-    // パディング
-    const padLen = segmentLength - stride;
-    const totalPadLen = length + 2 * padLen;
+    if (SHIFTS > 0) {
+      // ---- shifts: ランダムシフト推論で精度向上 ----
+      const maxShift = Math.floor(0.5 * sr); // 22050 samples (0.5s)
 
-    const paddedInput = new Float32Array(channels * totalPadLen);
-    for (let ch = 0; ch < channels; ch++) {
-      const srcOff = ch * length;
-      const dstOff = ch * totalPadLen + padLen;
-      for (let i = 0; i < length; i++) {
-        paddedInput[dstOff + i] = audioData[srcOff + i];
-      }
-      for (let i = 0; i < padLen; i++) {
-        paddedInput[ch * totalPadLen + padLen - 1 - i] =
-          audioData[srcOff + Math.min(i + 1, length - 1)];
-      }
-      for (let i = 0; i < padLen; i++) {
-        paddedInput[ch * totalPadLen + padLen + length + i] =
-          audioData[srcOff + Math.max(length - 2 - i, 0)];
-      }
-    }
-
-    const numSegments = Math.max(1, Math.ceil((totalPadLen - segmentLength) / stride) + 1);
-
-    // 出力バッファ
-    const output = new Float32Array(numSources * channels * length);
-    const sumWeight = new Float32Array(length);
-
-    onProgress?.(10, `楽器分離を実行中... (0/${numSegments})`);
-
-    for (let seg = 0; seg < numSegments; seg++) {
-      const start = seg * stride;
-      const end = Math.min(start + segmentLength, totalPadLen);
-      const actualLen = end - start;
-
-      // セグメント切り出し
-      const segMix = new Float32Array(channels * segmentLength);
+      // 入力を length + 2 * maxShift にリフレクトパディング
+      const paddedLength = length + 2 * maxShift;
+      const paddedAudio = new Float32Array(channels * paddedLength);
       for (let ch = 0; ch < channels; ch++) {
-        const srcOff = ch * totalPadLen + start;
-        for (let i = 0; i < actualLen; i++) {
-          segMix[ch * segmentLength + i] = paddedInput[srcOff + i];
+        const srcOff = ch * length;
+        const dstOff = ch * paddedLength + maxShift;
+        // 中央にコピー
+        for (let i = 0; i < length; i++) {
+          paddedAudio[dstOff + i] = audioData[srcOff + i];
+        }
+        // reflect pad 左
+        for (let i = 0; i < maxShift; i++) {
+          paddedAudio[ch * paddedLength + maxShift - 1 - i] =
+            audioData[srcOff + Math.min(i + 1, length - 1)];
+        }
+        // reflect pad 右
+        for (let i = 0; i < maxShift; i++) {
+          paddedAudio[ch * paddedLength + maxShift + length + i] =
+            audioData[srcOff + Math.max(length - 2 - i, 0)];
         }
       }
 
-      // ---- 1. STFT (JavaScript) ----
-      const channelSpecs = [];
-      for (let ch = 0; ch < channels; ch++) {
-        const chSignal = segMix.subarray(ch * segmentLength, (ch + 1) * segmentLength);
-        channelSpecs.push(htdemucsSpec(chSignal, specParams));
-      }
-      const mag = specToMagnitude(channelSpecs);
+      output = new Float32Array(numSources * channels * length);
 
-      // ---- 2. ONNX 推論 ----
-      const Fr = specParams.numFreqBins;
-      const T_spec = specParams.specTimeFrames;
-      const magTensor = new ort.Tensor('float32', mag, [1, channels * 2, Fr, T_spec]);
-      const mixTensor = new ort.Tensor('float32', segMix, [1, channels, segmentLength]);
+      for (let s = 0; s < SHIFTS; s++) {
+        const offset = Math.floor(Math.random() * (maxShift + 1));
+        const shiftedLength = length + maxShift - offset;
 
-      const feeds: Record<string, ort.Tensor> = {
-        mag: magTensor,
-        mix: mixTensor,
-      };
-      const results = await this.session.run(feeds);
-      const freqOutData = results['freq_out'].data as Float32Array;
-      const timeOutData = results['time_out'].data as Float32Array;
-
-      // ---- 3. iSTFT (JavaScript) ----
-      const freqWaveform = freqOutToWaveform(
-        freqOutData,
-        numSources,
-        channels,
-        specParams,
-        segmentLength,
-      );
-
-      // freq + time を合成
-      // freqWaveform: [S * C * segmentLength]
-      // timeOutData:  [1 * S * C * segmentLength] (バッチ次元含む)
-
-      // overlap-add 蓄積
-      const outStart = start - padLen;
-      for (let src = 0; src < numSources; src++) {
+        // パディング済みから切り出し
+        const shiftedAudio = new Float32Array(channels * shiftedLength);
         for (let ch = 0; ch < channels; ch++) {
-          const freqOff = (src * channels + ch) * segmentLength;
-          const timeOff = (src * channels + ch) * segmentLength; // 1バッチなので同じオフセット
-          const bufOff = (src * channels + ch) * length;
-          for (let i = 0; i < actualLen; i++) {
-            const outIdx = outStart + i;
-            if (outIdx >= 0 && outIdx < length) {
-              const sample = freqWaveform[freqOff + i] + timeOutData[timeOff + i];
-              output[bufOff + outIdx] += sample * weight[i];
+          const pOff = ch * paddedLength + offset;
+          const sOff = ch * shiftedLength;
+          for (let i = 0; i < shiftedLength; i++) {
+            shiftedAudio[sOff + i] = paddedAudio[pOff + i];
+          }
+        }
+
+        // 進捗の範囲を shifts 回で分割
+        const pStart = 10 + Math.round((s / SHIFTS) * 75);
+        const pEnd = 10 + Math.round(((s + 1) / SHIFTS) * 75);
+
+        const shiftedOutput = await this._runSegmentedInference(
+          shiftedAudio, channels, shiftedLength, specParams, pStart, pEnd, onProgress,
+        );
+
+        // 逆シフト: shiftedOutput[..., maxShift - offset:] を取得
+        const trimStart = maxShift - offset;
+        for (let src = 0; src < numSources; src++) {
+          for (let ch = 0; ch < channels; ch++) {
+            const sOff = (src * channels + ch) * shiftedLength + trimStart;
+            const dOff = (src * channels + ch) * length;
+            for (let i = 0; i < length; i++) {
+              output[dOff + i] += shiftedOutput[sOff + i];
             }
           }
         }
       }
 
-      for (let i = 0; i < actualLen; i++) {
-        const outIdx = outStart + i;
-        if (outIdx >= 0 && outIdx < length) {
-          sumWeight[outIdx] += weight[i];
+      // 平均化
+      if (SHIFTS > 1) {
+        for (let i = 0; i < output.length; i++) {
+          output[i] /= SHIFTS;
         }
       }
-
-      const pct = 10 + Math.round(((seg + 1) / numSegments) * 75);
-      onProgress?.(pct, `楽器分離を実行中... (${seg + 1}/${numSegments})`);
-      await yieldToEventLoop();
-    }
-
-    // 重み正規化
-    for (let src = 0; src < numSources; src++) {
-      for (let ch = 0; ch < channels; ch++) {
-        const off = (src * channels + ch) * length;
-        for (let i = 0; i < length; i++) {
-          if (sumWeight[i] > 0) output[off + i] /= sumWeight[i];
-        }
-      }
+    } else {
+      // ---- shifts=0: シフトなし ----
+      output = await this._runSegmentedInference(
+        audioData, channels, length, specParams, 10, 85, onProgress,
+      );
     }
 
     onProgress?.(90, '結果を生成中...');
 
-    // ステム抽出
+    // ---- ステム抽出 ----
     const allStems = cfg.stems;
     const resultStems: StemResult[] = [];
 
@@ -305,6 +261,150 @@ export class OnnxSeparator {
 
     onProgress?.(95, '完了準備中...');
     return { stems: resultStems, sampleRate: sr };
+  }
+
+  /* ---------- セグメント分割推論 (内部) ---------- */
+
+  /**
+   * 入力音声をセグメントに分割し、各セグメントで ONNX 推論 → overlap-add で結合する。
+   * @returns Float32Array [numSources * channels * length]
+   */
+  private async _runSegmentedInference(
+    audioData: Float32Array,
+    channels: number,
+    length: number,
+    specParams: SpecParams,
+    progressStart: number,
+    progressEnd: number,
+    onProgress?: ProgressCallback,
+  ): Promise<Float32Array> {
+    const cfg = this.config!;
+    const numSources = cfg.stems.length;
+    const segmentLength = Math.round(cfg.segment * cfg.sampleRate);
+    const overlap = 0.25;
+    const stride = Math.round((1 - overlap) * segmentLength);
+
+    // テント窓
+    const weight = new Float32Array(segmentLength);
+    const half = Math.floor(segmentLength / 2);
+    for (let i = 0; i < half; i++) weight[i] = (i + 1) / half;
+    for (let i = half; i < segmentLength; i++) weight[i] = (segmentLength - i) / (segmentLength - half);
+
+    // パディング
+    const padLen = segmentLength - stride;
+    const totalPadLen = length + 2 * padLen;
+
+    const paddedInput = new Float32Array(channels * totalPadLen);
+    for (let ch = 0; ch < channels; ch++) {
+      const srcOff = ch * length;
+      const dstOff = ch * totalPadLen + padLen;
+      for (let i = 0; i < length; i++) {
+        paddedInput[dstOff + i] = audioData[srcOff + i];
+      }
+      for (let i = 0; i < padLen; i++) {
+        paddedInput[ch * totalPadLen + padLen - 1 - i] =
+          audioData[srcOff + Math.min(i + 1, length - 1)];
+      }
+      for (let i = 0; i < padLen; i++) {
+        paddedInput[ch * totalPadLen + padLen + length + i] =
+          audioData[srcOff + Math.max(length - 2 - i, 0)];
+      }
+    }
+
+    const numSegments = Math.max(1, Math.ceil((totalPadLen - segmentLength) / stride) + 1);
+
+    // 出力バッファ
+    const output = new Float32Array(numSources * channels * length);
+    const sumWeight = new Float32Array(length);
+
+    const progressRange = progressEnd - progressStart;
+    onProgress?.(progressStart, `楽器分離を実行中... (0/${numSegments})`);
+
+    for (let seg = 0; seg < numSegments; seg++) {
+      const start = seg * stride;
+      const end = Math.min(start + segmentLength, totalPadLen);
+      const actualLen = end - start;
+
+      // セグメント切り出し
+      const segMix = new Float32Array(channels * segmentLength);
+      for (let ch = 0; ch < channels; ch++) {
+        const srcOff = ch * totalPadLen + start;
+        for (let i = 0; i < actualLen; i++) {
+          segMix[ch * segmentLength + i] = paddedInput[srcOff + i];
+        }
+      }
+
+      // ---- 1. STFT (JavaScript) ----
+      const channelSpecs = [];
+      for (let ch = 0; ch < channels; ch++) {
+        const chSignal = segMix.subarray(ch * segmentLength, (ch + 1) * segmentLength);
+        channelSpecs.push(htdemucsSpec(chSignal, specParams));
+      }
+      const mag = specToMagnitude(channelSpecs);
+
+      // ---- 2. ONNX 推論 ----
+      const Fr = specParams.numFreqBins;
+      const T_spec = specParams.specTimeFrames;
+      const magTensor = new ort.Tensor('float32', mag, [1, channels * 2, Fr, T_spec]);
+      const mixTensor = new ort.Tensor('float32', segMix, [1, channels, segmentLength]);
+
+      const feeds: Record<string, ort.Tensor> = {
+        mag: magTensor,
+        mix: mixTensor,
+      };
+      const results = await this.session!.run(feeds);
+      const freqOutData = results['freq_out'].data as Float32Array;
+      const timeOutData = results['time_out'].data as Float32Array;
+
+      // ---- 3. iSTFT (JavaScript) ----
+      const freqWaveform = freqOutToWaveform(
+        freqOutData,
+        numSources,
+        channels,
+        specParams,
+        segmentLength,
+      );
+
+      // overlap-add 蓄積
+      const outStart = start - padLen;
+      for (let src = 0; src < numSources; src++) {
+        for (let ch = 0; ch < channels; ch++) {
+          const freqOff = (src * channels + ch) * segmentLength;
+          const timeOff = (src * channels + ch) * segmentLength;
+          const bufOff = (src * channels + ch) * length;
+          for (let i = 0; i < actualLen; i++) {
+            const outIdx = outStart + i;
+            if (outIdx >= 0 && outIdx < length) {
+              const sample = freqWaveform[freqOff + i] + timeOutData[timeOff + i];
+              output[bufOff + outIdx] += sample * weight[i];
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < actualLen; i++) {
+        const outIdx = outStart + i;
+        if (outIdx >= 0 && outIdx < length) {
+          sumWeight[outIdx] += weight[i];
+        }
+      }
+
+      const pct = progressStart + Math.round(((seg + 1) / numSegments) * progressRange);
+      onProgress?.(pct, `楽器分離を実行中... (${seg + 1}/${numSegments})`);
+      await yieldToEventLoop();
+    }
+
+    // 重み正規化
+    for (let src = 0; src < numSources; src++) {
+      for (let ch = 0; ch < channels; ch++) {
+        const off = (src * channels + ch) * length;
+        for (let i = 0; i < length; i++) {
+          if (sumWeight[i] > 0) output[off + i] /= sumWeight[i];
+        }
+      }
+    }
+
+    return output;
   }
 
   /* ---------- リソース解放 ---------- */
