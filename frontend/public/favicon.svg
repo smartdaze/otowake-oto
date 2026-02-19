@@ -2,27 +2,10 @@
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#7ecbdf"/>
-      <stop offset="40%" stop-color="#4ba8d4"/>
-      <stop offset="100%" stop-color="#2e8bc0"/>
+      <stop offset="30%" stop-color="#4ba8d4"/>
+      <stop offset="60%" stop-color="#2e8bc0"/>
+      <stop offset="100%" stop-color="#5eb5ce"/>
     </linearGradient>
   </defs>
-  <circle cx="32" cy="32" r="30" fill="url(#g)"/>
-  <!-- music note -->
-  <g fill="#fff">
-    <!-- note head 1 -->
-    <ellipse cx="22" cy="44" rx="6.5" ry="5" transform="rotate(-15 22 44)"/>
-    <!-- note head 2 -->
-    <ellipse cx="40" cy="40" rx="6.5" ry="5" transform="rotate(-15 40 40)"/>
-    <!-- stem 1 -->
-    <rect x="27.5" y="16" width="3" height="29" rx="1.5"/>
-    <!-- stem 2 -->
-    <rect x="45.5" y="12" width="3" height="29" rx="1.5"/>
-    <!-- beam -->
-    <rect x="27.5" y="12" width="21" height="4" rx="2" transform="rotate(-5 38 14)"/>
-  </g>
-  <!-- sound waves -->
-  <g fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2" stroke-linecap="round">
-    <path d="M50 24c3-3 5-1 5 3s-2 6-5 3"/>
-    <path d="M53 20c5-4 8-1 8 6s-3 10-8 6"/>
-  </g>
+  <text x="32" y="52" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="58" font-weight="700" letter-spacing="-1" fill="url(#g)">O</text>
 </svg>
