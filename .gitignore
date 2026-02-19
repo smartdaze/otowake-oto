@@ -21,6 +21,7 @@ npm-debug.log*
 # Large binary files (download/generate at setup time)
 *.onnx
 *.wasm
+frontend/public/ort-*.mjs
 frontend/public/models/*.json
 
 # Python

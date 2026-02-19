@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "setup:wasm": "mkdir -p public && cp node_modules/onnxruntime-web/dist/*.wasm public/ 2>/dev/null || true",
+    "setup:wasm": "mkdir -p public && cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded* public/ 2>/dev/null || true",
     "setup:models": "bash scripts/setup-models.sh",
     "setup": "npm run setup:wasm && npm run setup:models",
     "dev": "npm run setup:wasm && vite",
