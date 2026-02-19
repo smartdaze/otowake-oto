@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.sw?
+
+# Large binary files (download/generate at setup time)
+*.onnx
+*.wasm
+frontend/public/models/*.json
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# Backend job artifacts
+backend/jobs/uploads/
+backend/jobs/outputs/

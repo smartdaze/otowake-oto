@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OtoWake - 無料で音源からギター・ボーカル等を分離・抽出</title>
+  <meta name="description" content="ボーカル・ドラム・ベース・ギター・ピアノを無料で音源分離。ブラウザだけで使え、音源のアップロード不要。">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta property="og:title" content="OtoWake - 好きな曲で、歌ってみよう。弾いてみよう。">
+  <meta property="og:description" content="ボーカル除去もパート抽出も、ブラウザだけで完結。無料の音源分離Webアプリ。">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="ogp.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="OtoWake - 好きな曲で、歌ってみよう。弾いてみよう。">
+  <meta name="twitter:description" content="ボーカル除去もパート抽出も、ブラウザだけで完結。無料の音源分離Webアプリ。">
+  <meta name="twitter:image" content="ogp.png">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #ffffff;
+      --bg-surface: #f7f7f7;
+      --bg-glass: rgba(255, 255, 255, 0.75);
+      --bg-glass-solid: rgba(250, 250, 252, 0.92);
+      --border: rgba(0, 0, 0, 0.07);
+      --border-hover: rgba(0, 0, 0, 0.14);
+      --accent: #5eb5ce;
+      --accent-dim: rgba(94, 181, 206, 0.08);
+      --accent-glow: rgba(94, 181, 206, 0.06);
+      --heading: #1a1a1a;
+      --text: #333333;
+      --text-dim: #666666;
+      --radius: 12px;
+      --glass-blur: blur(24px);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ===== Nav ===== */
+    .nav {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      z-index: 100;
+      padding: 0 40px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      background: linear-gradient(135deg, #7ecbdf 0%, #4ba8d4 30%, #2e8bc0 60%, #5eb5ce 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-links { display: flex; gap: 24px; list-style: none; }
+
+    .nav-links a {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      font-weight: 500;
+      letter-spacing: 0.2px;
+      transition: color 0.25s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    /* ===== Shared ===== */
+    .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    .section-heading {
+      font-size: clamp(1.5rem, 3vw, 1.9rem);
+      font-weight: 600;
+      color: var(--heading);
+      line-height: 1.4;
+      letter-spacing: -0.01em;
+      display: inline-block;
+      position: relative;
+      padding-bottom: 12px;
+    }
+    .section-heading::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 48px;
+      height: 3px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #4ba8d4, #7ecbdf);
+    }
+
+    /* Glass card */
+    .glass {
+      background: var(--bg-glass);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+    }
+    .glass:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-hover);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+    }
+
+    /* ===== HERO ===== */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 100px 24px 60px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Ambient glow */
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -5%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(94, 181, 206, 0.08) 0%, rgba(60, 140, 180, 0.03) 35%, transparent 65%);
+      pointer-events: none;
+    }
+
+    .hero-logo {
+      font-size: clamp(2.8rem, 7vw, 4.5rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #7ecbdf 0%, #4ba8d4 30%, #2e8bc0 60%, #5eb5ce 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 2px 8px rgba(78, 172, 212, 0.25));
+      position: relative;
+    }
+
+    .hero-title {
+      font-size: clamp(1.5rem, 3.5vw, 2rem);
+      font-weight: 600;
+      color: var(--heading);
+      letter-spacing: -0.01em;
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+
+    .hero-sub {
+      font-size: clamp(0.92rem, 1.8vw, 1rem);
+      color: var(--text-dim);
+      margin-bottom: 36px;
+      font-weight: 400;
+      letter-spacing: 0.2px;
+    }
+
+    /* ----- Console ----- */
+    .console {
+      width: 100%;
+      max-width: 560px;
+      background: var(--bg-glass-solid);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px 24px 20px;
+      box-shadow: 0 4px 32px rgba(0, 0, 0, 0.06);
+    }
+
+    /* Drop */
+    .drop-area {
+      border: 1.5px dashed rgba(0, 0, 0, 0.12);
+      border-radius: 10px;
+      padding: 28px 20px;
+      text-align: center;
+      cursor: pointer;
+      position: relative;
+      transition: border-color 0.3s, background 0.3s;
+      margin-bottom: 18px;
+    }
+    .drop-area:hover, .drop-area.dragover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .drop-area input {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    }
+    .drop-area svg {
+      width: 28px; height: 28px;
+      stroke: var(--text-dim); fill: none;
+      stroke-width: 1.5; opacity: 0.8;
+      margin-bottom: 10px;
+    }
+    .drop-label {
+      font-size: 0.92rem; color: var(--text);
+    }
+    .drop-label strong { color: var(--heading); }
+    .drop-hint {
+      font-size: 0.78rem; color: var(--text-dim); margin-top: 4px;
+    }
+
+    /* File bar */
+    .file-bar {
+      display: none;
+      align-items: center; gap: 10px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(94, 181, 206, 0.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 18px;
+    }
+    .file-bar.show { display: flex; }
+    .file-bar svg {
+      width: 16px; height: 16px;
+      stroke: var(--accent); fill: none; stroke-width: 2; flex-shrink: 0;
+    }
+    .file-bar-name {
+      font-size: 0.88rem; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .file-bar-remove {
+      margin-left: auto; background: none; border: none;
+      color: var(--text-dim); cursor: pointer;
+      font-size: 1rem; line-height: 1;
+      transition: color 0.2s;
+    }
+    .file-bar-remove:hover { color: var(--text); }
+
+    /* Mode toggle */
+    .mode-row {
+      display: flex; gap: 0; margin-bottom: 14px;
+    }
+    .mode-btn {
+      flex: 1; padding: 8px 0;
+      font-size: 0.82rem; font-weight: 500;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.3px;
+    }
+    .mode-btn:first-child { border-radius: 6px 0 0 6px; }
+    .mode-btn:last-child  { border-radius: 0 6px 6px 0; border-left: none; }
+    .mode-btn.active {
+      background: var(--accent-dim);
+      color: var(--heading);
+      border-color: rgba(0, 0, 0, 0.12);
+    }
+    .mode-btn:last-child.active { border-left: 1px solid rgba(0, 0, 0, 0.12); }
+
+    /* Parts */
+    .parts-row {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 5px; margin-bottom: 16px;
+    }
+    .part-btn {
+      padding: 9px 0;
+      font-size: 0.8rem; font-weight: 500;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .part-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    /* Disabled */
+    .console-controls.disabled {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .btn-run {
+      width: 100%; padding: 12px;
+      border: none; border-radius: 6px;
+      background: linear-gradient(135deg, #4ba8d4, #2e8bc0);
+      color: #ffffff;
+      font-size: 0.9rem; font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      letter-spacing: 0.3px;
+    }
+    .btn-run:hover { opacity: 0.88; }
+
+    .btn-run:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .console-note {
+      text-align: center;
+      margin-top: 10px;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      letter-spacing: 0.3px;
+    }
+
+    /* Progress */
+    .progress-area {
+      display: none;
+      margin-top: 16px;
+    }
+    .progress-area.show { display: block; }
+    .progress-outer {
+      width: 100%;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-inner {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #4ba8d4, #2e8bc0);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+    .progress-msg {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    /* Results */
+    .results-area {
+      display: none;
+      margin-top: 16px;
+    }
+    .results-area.show { display: block; }
+    .results-list {
+      list-style: none;
+      padding: 0;
+    }
+    .results-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .results-list li:last-child { border-bottom: none; }
+    .results-list .track-name {
+      color: var(--heading);
+      font-weight: 500;
+    }
+    .dl-btn {
+      display: inline-block;
+      padding: 4px 12px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      font-family: inherit;
+      color: #fff;
+      background: linear-gradient(135deg, #4ba8d4, #2e8bc0);
+      border: none;
+      border-radius: 4px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .dl-btn:hover { opacity: 0.85; }
+    .dl-all-btn {
+      display: block;
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      text-align: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: inherit;
+      color: var(--heading);
+      background: var(--accent-dim);
+      border: 1px solid rgba(94, 181, 206, 0.2);
+      border-radius: 6px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .dl-all-btn:hover { background: rgba(94, 181, 206, 0.15); }
+    .btn-reset {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      font-family: inherit;
+      color: var(--text-dim);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-reset:hover { border-color: var(--border-hover); color: var(--text); }
+
+    /* Error */
+    .error-msg {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: rgba(255, 68, 68, 0.08);
+      border: 1px solid rgba(255, 68, 68, 0.2);
+      border-radius: 6px;
+      color: #cc3333;
+      font-size: 0.82rem;
+      text-align: center;
+    }
+    .error-msg.show { display: block; }
+
+    /* Upload spinner */
+    .uploading-text {
+      font-size: 0.88rem;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* ===== RECOMMEND ===== */
+    .recommend { padding: 80px 0; position: relative; z-index: 1; }
+    .recommend-header { text-align: center; margin-bottom: 40px; }
+
+    .recommend-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .recommend-card {
+      padding: 24px 18px; text-align: center;
+    }
+    .recommend-card .rc-icon {
+      width: 36px; height: 36px;
+      margin: 0 auto 12px;
+      border-radius: 8px;
+      background: var(--accent-dim);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .recommend-card .rc-icon svg {
+      width: 18px; height: 18px;
+      stroke: var(--accent); fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .recommend-card p {
+      font-size: 0.92rem; color: var(--text); line-height: 1.5;
+    }
+
+    /* ===== FEATURES ===== */
+    .features { padding: 80px 0; position: relative; z-index: 1; }
+    .features-header { text-align: center; margin-bottom: 40px; }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .feature-card {
+      padding: 28px 16px; text-align: center;
+    }
+    .feature-card .fc-icon {
+      width: 40px; height: 40px;
+      margin: 0 auto 14px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .feature-card .fc-icon svg {
+      width: 22px; height: 22px;
+      stroke: var(--accent); fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .feature-card h3 {
+      font-size: 0.92rem; font-weight: 600;
+      color: var(--heading);
+      margin-bottom: 4px;
+    }
+    .feature-card p {
+      font-size: 0.82rem; color: var(--text-dim); line-height: 1.5;
+    }
+
+    /* ===== HOWTO ===== */
+    .howto { padding: 80px 0; position: relative; z-index: 1; }
+    .howto-header { text-align: center; margin-bottom: 40px; }
+
+    .howto-steps {
+      display: flex; gap: 16px; justify-content: center;
+    }
+    .howto-card {
+      flex: 1; max-width: 280px;
+      padding: 28px 20px; text-align: center;
+    }
+    .step-tag {
+      display: inline-block;
+      font-size: 0.68rem; font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 2px 10px;
+      border-radius: 3px;
+      margin-bottom: 14px;
+    }
+    .howto-card h3 {
+      font-size: 0.95rem; font-weight: 600;
+      color: var(--heading);
+      margin-bottom: 4px;
+    }
+    .howto-card p {
+      font-size: 0.85rem; color: var(--text-dim);
+    }
+
+    /* ===== FAQ ===== */
+    .faq { padding: 80px 0; position: relative; z-index: 1; }
+    .faq-header { text-align: center; margin-bottom: 40px; }
+
+    .faq-list { max-width: 600px; margin: 0 auto; }
+    .faq-item { border-bottom: 1px solid var(--border); }
+
+    .faq-q {
+      width: 100%; text-align: left;
+      padding: 18px 0;
+      background: none; border: none;
+      color: var(--text);
+      font-size: 0.92rem; font-weight: 500;
+      cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: inherit;
+      transition: color 0.25s;
+    }
+    .faq-q:hover { color: var(--heading); }
+
+    .faq-chevron {
+      transition: transform 0.3s;
+      flex-shrink: 0; margin-left: 20px;
+      color: var(--text-dim);
+    }
+    .faq-item.open .faq-chevron { transform: rotate(180deg); }
+
+    .faq-a {
+      max-height: 0; overflow: hidden;
+      transition: max-height 0.35s ease;
+    }
+    .faq-item.open .faq-a { max-height: 160px; }
+
+    .faq-a-inner {
+      padding: 0 0 18px;
+      font-size: 0.88rem; color: var(--text-dim); line-height: 1.7;
+    }
+
+    /* ===== Footer ===== */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 28px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+      max-width: 920px; margin: 0 auto;
+      position: relative; z-index: 1;
+    }
+    .footer-copy { font-size: 0.75rem; color: var(--text-dim); }
+    .footer-links { display: flex; gap: 14px; list-style: none; }
+    .footer-links a { color: var(--text-dim); transition: color 0.25s; }
+    .footer-links a:hover { color: var(--text); }
+    .footer-links svg { width: 16px; height: 16px; fill: currentColor; display: block; }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 768px) {
+      .nav { padding: 0 20px; gap: 20px; }
+      .nav-links a { font-size: 0.78rem; }
+      .recommend-grid { grid-template-columns: 1fr 1fr; }
+      .features-grid { grid-template-columns: 1fr 1fr; }
+      .howto-steps { flex-direction: column; align-items: center; gap: 12px; }
+      .parts-row { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+      .console { padding: 20px 16px 18px; }
+      .footer { flex-direction: column; gap: 10px; }
+    }
+
+    @media (max-width: 480px) {
+      .nav-links { display: none; }
+      .recommend-grid { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr 1fr; }
+      .parts-row { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+      .drop-area { padding: 22px 14px; }
+    }
+
+    /* Fade */
+    .fade-in {
+      opacity: 0; transform: translateY(16px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-logo">OtoWake</div>
+    <ul class="nav-links">
+      <li><a href="#howto">使い方</a></li>
+      <li><a href="#recommend">こんな人に</a></li>
+      <li><a href="#features">特徴</a></li>
+      <li><a href="#faq">よくある質問</a></li>
+    </ul>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <p class="hero-logo">OtoWake</p>
+    <h1 class="hero-title">好きな曲で、歌ってみよう。弾いてみよう。</h1>
+    <p class="hero-sub">ボーカル除去もパート抽出も、ブラウザだけで完結。</p>
+
+    <div class="console">
+      <div class="drop-area" id="dropArea">
+        <input type="file" accept="audio/*" id="fileInput">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p class="drop-label">音源をドロップ、または<strong>選択</strong></p>
+        <p class="drop-hint">MP3 / WAV / FLAC / OGG</p>
+      </div>
+
+      <div class="file-bar" id="fileBar">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+        </svg>
+        <span class="file-bar-name" id="fileName"></span>
+        <button class="file-bar-remove" id="removeFile">&times;</button>
+      </div>
+
+      <div class="console-controls disabled" id="controls">
+        <div class="mode-row">
+          <button class="mode-btn active" data-mode="extract">抽出する</button>
+          <button class="mode-btn" data-mode="remove">除去する</button>
+        </div>
+        <div class="parts-row">
+          <button class="part-btn" data-part="vocals">Vocals</button>
+          <button class="part-btn" data-part="drums">Drums</button>
+          <button class="part-btn" data-part="bass">Bass</button>
+          <button class="part-btn" data-part="guitar">Guitar</button>
+          <button class="part-btn" data-part="piano">Piano</button>
+          <button class="part-btn" data-part="other">Other</button>
+        </div>
+        <button class="btn-run" id="btnRun">分離する</button>
+      </div>
+
+      <div class="progress-area" id="progressArea">
+        <div class="progress-outer">
+          <div class="progress-inner" id="progressBar"></div>
+        </div>
+        <p class="progress-msg" id="progressMsg">処理開始中...</p>
+      </div>
+
+      <div class="results-area" id="resultsArea">
+        <ul class="results-list" id="resultsList"></ul>
+        <a class="dl-all-btn" id="dlAllBtn" style="display:none">全トラックをZIPでダウンロード</a>
+        <button class="btn-reset" id="btnReset">新しいファイルを処理</button>
+      </div>
+
+      <div class="error-msg" id="errorMsg"></div>
+
+      <p class="console-note">無料 / 登録不要</p>
+    </div>
+  </section>
+
+  <!-- HOWTO -->
+  <section class="howto fade-in" id="howto">
+    <div class="wrap">
+      <div class="howto-header">
+        <p class="section-label">How it works</p>
+        <h2 class="section-heading">使い方</h2>
+      </div>
+      <div class="howto-steps">
+        <div class="howto-card glass">
+          <span class="step-tag">STEP 01</span>
+          <h3>音源を選択</h3>
+          <p>ファイルをドロップ</p>
+        </div>
+        <div class="howto-card glass">
+          <span class="step-tag">STEP 02</span>
+          <h3>モードとパートを選ぶ</h3>
+          <p>抽出 or 除去</p>
+        </div>
+        <div class="howto-card glass">
+          <span class="step-tag">STEP 03</span>
+          <h3>ダウンロード</h3>
+          <p>分離された音源を保存</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECOMMEND -->
+  <section class="recommend fade-in" id="recommend">
+    <div class="wrap">
+      <div class="recommend-header">
+        <p class="section-label">Use Cases</p>
+        <h2 class="section-heading">こんな人に</h2>
+      </div>
+      <div class="recommend-grid">
+        <div class="recommend-card glass">
+          <div class="rc-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </div>
+          <p>歌ってみた・カラオケ音源</p>
+        </div>
+        <div class="recommend-card glass">
+          <div class="rc-icon">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <p>弾いてみた・耳コピ</p>
+        </div>
+        <div class="recommend-card glass">
+          <div class="rc-icon">
+            <svg viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+          </div>
+          <p>楽器練習・パート別再生</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="features fade-in" id="features">
+    <div class="wrap">
+      <div class="features-header">
+        <p class="section-label">Features</p>
+        <h2 class="section-heading">特徴</h2>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card glass">
+          <div class="fc-icon">
+            <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <h3>6パート対応</h3>
+          <p>Vocals / Drums / Bass<br>Guitar / Piano / Other</p>
+        </div>
+        <div class="feature-card glass">
+          <div class="fc-icon">
+            <svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          </div>
+          <h3>抽出 &amp; 除去</h3>
+          <p>取り出しも消去も<br>ワンクリックで切替</p>
+        </div>
+        <div class="feature-card glass">
+          <div class="fc-icon">
+            <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h3>オフライン処理</h3>
+          <p>PC上で完結<br>サーバー送信なし</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq fade-in" id="faq">
+    <div class="wrap">
+      <div class="faq-header">
+        <p class="section-label">FAQ</p>
+        <h2 class="section-heading">よくある質問</h2>
+      </div>
+      <div class="faq-list">
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            対応ファイル形式は？
+            <svg class="faq-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">MP3、WAV、FLAC、OGGに対応しています。</div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            処理時間は？
+            <svg class="faq-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">3〜5分の楽曲で数十秒〜数分。GPU搭載PCではさらに高速です。</div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            音源がサーバーに送られる？
+            <svg class="faq-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">いいえ。すべてPC上で完結します。</div></div>
+        </div>
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            スマホでも使える？
+            <svg class="faq-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">現在はPC（macOS / Windows）向けです。</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p class="footer-copy">&copy; 2025 OtoWake &nbsp;|&nbsp; <a href="terms.html" style="color: var(--text-dim); text-decoration: underline; text-underline-offset: 2px;">利用規約</a> &nbsp;|&nbsp; <a href="privacy.html" style="color: var(--text-dim); text-decoration: underline; text-underline-offset: 2px;">プライバシーポリシー</a></p>
+    <ul class="footer-links">
+      <li>
+        <a href="https://github.com/" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+          <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </li>
+      <li>
+        <a href="https://twitter.com/" target="_blank" rel="noopener noreferrer" aria-label="X (Twitter)">
+          <svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+      </li>
+    </ul>
+  </footer>
+
+  <script>
+    // ===== API設定 =====
+    // 同一オリジン配信なら相対パス、ローカルファイルならlocalhost:8000
+    const API_BASE = window.location.protocol === 'file:'
+      ? 'http://localhost:8000'
+      : '';
+    const WS_BASE = window.location.protocol === 'file:'
+      ? 'ws://localhost:8000'
+      : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host;
+
+    // ===== DOM =====
+    const dropArea = document.getElementById('dropArea');
+    const fileInput = document.getElementById('fileInput');
+    const fileBar = document.getElementById('fileBar');
+    const fileNameEl = document.getElementById('fileName');
+    const removeBtn = document.getElementById('removeFile');
+    const controls = document.getElementById('controls');
+    const btnRun = document.getElementById('btnRun');
+    const progressArea = document.getElementById('progressArea');
+    const progressBar = document.getElementById('progressBar');
+    const progressMsg = document.getElementById('progressMsg');
+    const resultsArea = document.getElementById('resultsArea');
+    const resultsList = document.getElementById('resultsList');
+    const dlAllBtn = document.getElementById('dlAllBtn');
+    const btnReset = document.getElementById('btnReset');
+    const errorMsg = document.getElementById('errorMsg');
+
+    // ===== 状態 =====
+    let currentJobId = null;
+    let currentWs = null;
+    let originalFileName = '';  // 拡張子なしの元ファイル名
+
+    // ===== スクロールフェードイン =====
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.fade-in').forEach(el => obs.observe(el));
+
+    // ===== FAQ アコーディオン =====
+    document.querySelectorAll('.faq-q').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = btn.closest('.faq-item');
+        const isOpen = item.classList.contains('open');
+        document.querySelectorAll('.faq-item.open').forEach(i => {
+          i.classList.remove('open');
+          i.querySelector('.faq-q').setAttribute('aria-expanded', 'false');
+        });
+        if (!isOpen) {
+          item.classList.add('open');
+          btn.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+
+    // ===== パート・モード切替 =====
+    document.querySelectorAll('.part-btn').forEach(btn => {
+      btn.addEventListener('click', () => btn.classList.toggle('active'));
+    });
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // ===== ドラッグ&ドロップ =====
+    dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('dragover'); });
+    dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+    dropArea.addEventListener('drop', e => {
+      e.preventDefault();
+      dropArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', e => {
+      if (e.target.files.length) uploadFile(e.target.files[0]);
+    });
+    removeBtn.addEventListener('click', resetToIdle);
+
+    // ===== ファイルアップロード → API =====
+    async function uploadFile(file) {
+      hideError();
+      // アップロード中の見た目
+      dropArea.innerHTML = '<p class="uploading-text">アップロード中...</p>';
+      dropArea.style.pointerEvents = 'none';
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch(API_BASE + '/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || 'アップロードに失敗しました');
+        }
+
+        const data = await res.json();
+        currentJobId = data.job_id;
+        // 拡張子なしのファイル名を保持
+        originalFileName = data.file_name.replace(/\.[^.]+$/, '');
+
+        // ファイルバー表示
+        fileNameEl.textContent = data.file_name;
+        dropArea.style.display = 'none';
+        fileBar.classList.add('show');
+        controls.classList.remove('disabled');
+      } catch (err) {
+        showError(err.message);
+        restoreDropArea();
+      }
+    }
+
+    function restoreDropArea() {
+      dropArea.innerHTML = `
+        <input type="file" accept="audio/*" id="fileInput">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p class="drop-label">音源をドロップ、または<strong>選択</strong></p>
+        <p class="drop-hint">MP3 / WAV / FLAC / OGG</p>`;
+      dropArea.style.display = '';
+      dropArea.style.pointerEvents = '';
+      // input再取得してイベント再登録
+      const newInput = dropArea.querySelector('input[type="file"]');
+      newInput.addEventListener('change', e => {
+        if (e.target.files.length) uploadFile(e.target.files[0]);
+      });
+    }
+
+    // ===== 分離開始 =====
+    btnRun.addEventListener('click', startSeparation);
+
+    async function startSeparation() {
+      if (!currentJobId) return;
+      hideError();
+
+      // 選択されたパートを取得
+      const selectedStems = [];
+      document.querySelectorAll('.part-btn.active').forEach(btn => {
+        selectedStems.push(btn.dataset.part);
+      });
+
+      if (selectedStems.length === 0) {
+        showError('少なくとも1つのパートを選択してください');
+        return;
+      }
+
+      // モード取得
+      const activeMode = document.querySelector('.mode-btn.active');
+      const removeMode = activeMode && activeMode.dataset.mode === 'remove';
+
+      // UIをロック
+      btnRun.disabled = true;
+      btnRun.textContent = '処理中...';
+      controls.style.pointerEvents = 'none';
+      controls.style.opacity = '0.5';
+      fileBar.querySelector('.file-bar-remove').style.display = 'none';
+
+      // プログレス表示
+      progressArea.classList.add('show');
+      progressBar.style.width = '0%';
+      progressMsg.textContent = '処理開始中...';
+
+      try {
+        const res = await fetch(API_BASE + '/api/separate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            job_id: currentJobId,
+            model_name: 'htdemucs_6s',
+            stems: selectedStems,
+            output_format: 'mp3',
+            bitrate: '320k',
+            remove_mode: removeMode
+          })
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.detail || '分離開始に失敗しました');
+        }
+
+        // WebSocket接続
+        connectWebSocket(currentJobId);
+
+      } catch (err) {
+        showError(err.message);
+        unlockControls();
+      }
+    }
+
+    // ===== WebSocket進捗 =====
+    function connectWebSocket(jobId) {
+      if (currentWs) { currentWs.close(); currentWs = null; }
+
+      const ws = new WebSocket(WS_BASE + '/ws/progress/' + jobId);
+      currentWs = ws;
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'progress') {
+          progressBar.style.width = data.progress + '%';
+          progressMsg.textContent = data.progress + '% — ' + data.message;
+        }
+
+        if (data.type === 'complete') {
+          progressBar.style.width = '100%';
+          progressMsg.textContent = '分離完了！';
+          showResults(data.tracks, jobId);
+          ws.close();
+        }
+
+        if (data.type === 'error') {
+          showError(data.message);
+          progressArea.classList.remove('show');
+          unlockControls();
+          ws.close();
+        }
+      };
+
+      ws.onerror = () => {
+        showError('サーバーへの接続に失敗しました。バックエンドが起動しているか確認してください。');
+        progressArea.classList.remove('show');
+        unlockControls();
+      };
+
+      ws.onclose = () => { currentWs = null; };
+    }
+
+    // ===== 結果表示 =====
+    function showResults(tracks, jobId) {
+      resultsList.innerHTML = '';
+      const entries = Object.entries(tracks);
+
+      entries.forEach(([name, fileName]) => {
+        const ext = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.')) : '.mp3';
+        const dlName = originalFileName + '_' + name + ext;
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <span class="track-name">${name}</span>
+          <a class="dl-btn" href="${API_BASE}/api/jobs/${jobId}/download/${name}" download="${dlName}">ダウンロード</a>`;
+        resultsList.appendChild(li);
+      });
+
+      if (entries.length > 1) {
+        dlAllBtn.href = API_BASE + '/api/jobs/' + jobId + '/download-all';
+        dlAllBtn.download = originalFileName + '_all.zip';
+        dlAllBtn.style.display = 'block';
+      } else {
+        dlAllBtn.style.display = 'none';
+      }
+
+      // プログレスは残して結果を表示
+      setTimeout(() => {
+        progressArea.classList.remove('show');
+        resultsArea.classList.add('show');
+      }, 800);
+    }
+
+    // ===== リセット =====
+    btnReset.addEventListener('click', resetToIdle);
+
+    function resetToIdle() {
+      // ジョブ削除（バックグラウンド）
+      if (currentJobId) {
+        fetch(API_BASE + '/api/jobs/' + currentJobId, { method: 'DELETE' }).catch(() => {});
+      }
+      currentJobId = null;
+      originalFileName = '';
+      if (currentWs) { currentWs.close(); currentWs = null; }
+
+      // UIリセット
+      restoreDropArea();
+      fileBar.classList.remove('show');
+      controls.classList.add('disabled');
+      progressArea.classList.remove('show');
+      resultsArea.classList.remove('show');
+      resultsList.innerHTML = '';
+      hideError();
+      unlockControls();
+
+      // パート選択解除
+      document.querySelectorAll('.part-btn').forEach(b => b.classList.remove('active'));
+      // モードをデフォルトに
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.mode-btn[data-mode="extract"]').classList.add('active');
+    }
+
+    // ===== ヘルパー =====
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.add('show');
+    }
+    function hideError() {
+      errorMsg.textContent = '';
+      errorMsg.classList.remove('show');
+    }
+    function unlockControls() {
+      btnRun.disabled = false;
+      btnRun.textContent = '分離する';
+      controls.style.pointerEvents = '';
+      controls.style.opacity = '';
+      const removeFileBtn = fileBar.querySelector('.file-bar-remove');
+      if (removeFileBtn) removeFileBtn.style.display = '';
+    }
+  </script>
+
+</body>
+</html>
