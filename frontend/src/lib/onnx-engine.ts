@@ -58,9 +58,9 @@ export class OnnxSeparator {
     this.dispose();
     this.config = config;
 
-    // GitHub Releases から直接ダウンロード（Vercelの静的ファイルサイズ制限を回避）
-    const GITHUB_RELEASE_BASE = 'https://github.com/smartdaze/otowake-oto/releases/download/models-v1';
-    const modelUrl = `${GITHUB_RELEASE_BASE}/${config.modelFile}`;
+    // Hugging Face Hub からダウンロード（CORS対応・大容量ファイル対応）
+    const HF_MODEL_BASE = 'https://huggingface.co/smart2111/otowake-oto/resolve/main';
+    const modelUrl = `${HF_MODEL_BASE}/${config.modelFile}`;
     onProgress?.(0, 'モデルをダウンロード中...');
 
     const response = await fetch(modelUrl);
