@@ -135,6 +135,75 @@ export function encodeWav(
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+/* ---------- 速度変更レンダリング（ピッチ保持） ---------- */
+
+/**
+ * AudioBuffer を指定した速度でタイムストレッチし、新しい AudioBuffer を返す。
+ * SoundTouch によるピッチ保持タイムストレッチ。
+ */
+export async function renderAtSpeed(
+  audioBuffer: AudioBuffer,
+  speed: number,
+): Promise<AudioBuffer> {
+  const { SoundTouch, SimpleFilter, WebAudioBufferSource } = await import('soundtouchjs');
+
+  const st = new SoundTouch();
+  st.tempo = speed;
+
+  const source = new WebAudioBufferSource(audioBuffer);
+  const filter = new SimpleFilter(source, st);
+
+  const sr = audioBuffer.sampleRate;
+  const BLOCK = 4096;
+  const buf = new Float32Array(BLOCK * 2); // インターリーブステレオ
+  const chunks: Float32Array[] = [];
+  let totalFrames = 0;
+
+  // ブロック単位で出力を取得
+  for (;;) {
+    const n = filter.extract(buf, BLOCK);
+    if (n === 0) break;
+    chunks.push(buf.slice(0, n * 2));
+    totalFrames += n;
+  }
+
+  // インターリーブ → 分離チャネル
+  const numCh = Math.min(audioBuffer.numberOfChannels, 2);
+  const ctx = new AudioContext();
+  const result = ctx.createBuffer(numCh, totalFrames, sr);
+
+  const left = new Float32Array(totalFrames);
+  const right = numCh > 1 ? new Float32Array(totalFrames) : null;
+  let offset = 0;
+  for (const chunk of chunks) {
+    const frames = chunk.length / 2;
+    for (let i = 0; i < frames; i++) {
+      left[offset + i] = chunk[i * 2];
+      if (right) right[offset + i] = chunk[i * 2 + 1];
+    }
+    offset += frames;
+  }
+
+  result.copyToChannel(left, 0);
+  if (right) result.copyToChannel(right, 1);
+  await ctx.close();
+
+  return result;
+}
+
+/**
+ * Blob を AudioBuffer にデコードする。
+ */
+export async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const ctx = new AudioContext();
+  try {
+    return await ctx.decodeAudioData(arrayBuffer);
+  } finally {
+    await ctx.close();
+  }
+}
+
 /* ---------- AudioInfo ---------- */
 
 export function getAudioInfo(file: File, audioBuffer: AudioBuffer): AudioInfo {

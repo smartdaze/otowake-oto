@@ -9,7 +9,9 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { MODEL_CONFIGS, DEFAULT_MODEL } from './lib/model-config.ts';
 import {
   decodeAudioFile,
+  decodeBlobToAudioBuffer,
   resampleAudio,
+  renderAtSpeed,
   audioBufferToChannelData,
   encodeWav,
 } from './lib/audio-utils.ts';
@@ -26,6 +28,7 @@ interface DownloadableTrack {
 }
 
 const ALL_PARTS = ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] as const;
+const SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] as const;
 
 const PART_LABELS: Record<string, string> = {
   vocals: 'Vocals',
@@ -58,9 +61,19 @@ export default function App() {
 
   const [elapsedSec, setElapsedSec] = useState(0);
 
+  /* ---- 再生プレーヤー状態 ---- */
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [originalAudioUrl, setOriginalAudioUrl] = useState<string | null>(null);
+
   const separatorRef = useRef(new OnnxSeparator());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const originalAudioRef = useRef<HTMLAudioElement>(null);
+  const trackAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   /* ---- スクロールフェードイン ---- */
   useEffect(() => {
@@ -76,13 +89,139 @@ export default function App() {
     return () => obs.disconnect();
   }, []);
 
+  /* ---- 再生ヘルパー ---- */
+  const getAudioElement = useCallback((trackId: string | null): HTMLAudioElement | null => {
+    if (!trackId) return null;
+    if (trackId === 'original') return originalAudioRef.current;
+    return trackAudioRefs.current.get(trackId) ?? null;
+  }, []);
+
+  const formatTime = (sec: number) => {
+    if (!isFinite(sec) || isNaN(sec)) return '0:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const stopAllAudio = useCallback(() => {
+    originalAudioRef.current?.pause();
+    trackAudioRefs.current.forEach((audio) => audio.pause());
+  }, []);
+
+  const togglePlayPause = useCallback((trackId: string) => {
+    if (activeTrackId === trackId && isPlaying) {
+      getAudioElement(trackId)?.pause();
+      setIsPlaying(false);
+    } else if (activeTrackId === trackId && !isPlaying) {
+      const audio = getAudioElement(trackId);
+      if (audio) { audio.playbackRate = playbackRate; audio.play(); setIsPlaying(true); }
+    } else {
+      // 排他的再生: 他を全停止して切り替え
+      stopAllAudio();
+      const audio = trackId === 'original'
+        ? originalAudioRef.current
+        : trackAudioRefs.current.get(trackId) ?? null;
+      if (audio) {
+        audio.playbackRate = playbackRate;
+        audio.play();
+        setActiveTrackId(trackId);
+        setIsPlaying(true);
+      }
+    }
+  }, [activeTrackId, isPlaying, playbackRate, getAudioElement, stopAllAudio]);
+
+  const handleSeek = useCallback((trackId: string, time: number) => {
+    const audio = getAudioElement(trackId);
+    if (audio) {
+      audio.currentTime = time;
+      setCurrentTime(time);
+    }
+  }, [getAudioElement]);
+
+  const handleSpeedChange = useCallback((speed: number) => {
+    setPlaybackRate(speed);
+  }, []);
+
+  /* ---- 速度変更保存 ---- */
+  const [isRendering, setIsRendering] = useState(false);
+
+  const saveAtSpeed = useCallback(async (source: 'original' | { blob: Blob; name: string }) => {
+    if (Math.abs(playbackRate - 1.0) < 0.001) return;
+    setIsRendering(true);
+    try {
+      let audioBuffer: AudioBuffer;
+      let baseName: string;
+      if (source === 'original') {
+        if (!file) return;
+        audioBuffer = await decodeAudioFile(file);
+        baseName = file.name.replace(/\.[^.]+$/, '');
+      } else {
+        audioBuffer = await decodeBlobToAudioBuffer(source.blob);
+        baseName = source.name;
+      }
+      const rendered = await renderAtSpeed(audioBuffer, playbackRate);
+      const channels: Float32Array[] = [];
+      for (let c = 0; c < rendered.numberOfChannels; c++) {
+        channels.push(rendered.getChannelData(c));
+      }
+      const blob = encodeWav(channels, rendered.sampleRate);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}_${playbackRate.toFixed(2)}x.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsRendering(false);
+    }
+  }, [playbackRate, file]);
+
+  /* ---- playbackRate即時反映 ---- */
+  useEffect(() => {
+    const audio = getAudioElement(activeTrackId);
+    if (audio) audio.playbackRate = playbackRate;
+  }, [playbackRate, activeTrackId, getAudioElement]);
+
+  /* ---- アクティブトラックの時間追跡 ---- */
+  useEffect(() => {
+    const audio = getAudioElement(activeTrackId);
+    if (!audio) { setCurrentTime(0); setDuration(0); return; }
+
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onLoaded = () => setDuration(audio.duration);
+    const onEnded = () => setIsPlaying(false);
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('loadedmetadata', onLoaded);
+    audio.addEventListener('ended', onEnded);
+
+    if (audio.duration) setDuration(audio.duration);
+    setCurrentTime(audio.currentTime);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('loadedmetadata', onLoaded);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, [activeTrackId, getAudioElement]);
+
   /* ---- ファイル選択 ---- */
   const handleFile = useCallback((f: File) => {
+    stopAllAudio();
+    if (originalAudioUrl) URL.revokeObjectURL(originalAudioUrl);
     for (const t of tracks) URL.revokeObjectURL(t.url);
+
+    const url = URL.createObjectURL(f);
+    setOriginalAudioUrl(url);
     setFile(f);
     setTracks([]);
     setConsoleState('uploaded');
     setErrorMsg('');
+    setActiveTrackId(null);
+    setIsPlaying(false);
+    setPlaybackRate(1.0);
+    setCurrentTime(0);
+    setDuration(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -190,10 +329,14 @@ export default function App() {
 
   /* ---- リセット ---- */
   const handleReset = () => {
+    stopAllAudio();
+    if (originalAudioUrl) URL.revokeObjectURL(originalAudioUrl);
     for (const t of tracks) URL.revokeObjectURL(t.url);
+    trackAudioRefs.current.clear();
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setConsoleState('idle');
     setFile(null);
+    setOriginalAudioUrl(null);
     setSelectedParts([]);
     setRemoveMode(false);
     setTracks([]);
@@ -201,6 +344,11 @@ export default function App() {
     setProgress(0);
     setProgressMsg('');
     setElapsedSec(0);
+    setActiveTrackId(null);
+    setIsPlaying(false);
+    setPlaybackRate(1.0);
+    setCurrentTime(0);
+    setDuration(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -274,6 +422,75 @@ export default function App() {
             </div>
           )}
 
+          {/* 元音源プレーヤー（常に表示、ファイル未選択時はdisabled） */}
+          <div className={`player-section${!hasFile || !originalAudioUrl ? ' disabled' : ''}`}>
+            {originalAudioUrl && (
+              <audio ref={originalAudioRef} src={originalAudioUrl} preload="metadata" />
+            )}
+            <div className="player-controls">
+              <button
+                className={`play-btn${activeTrackId === 'original' && isPlaying ? ' playing' : ''}`}
+                onClick={() => togglePlayPause('original')}
+                aria-label={activeTrackId === 'original' && isPlaying ? '一時停止' : '再生'}
+              >
+                {activeTrackId === 'original' && isPlaying ? (
+                  <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                ) : (
+                  <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                )}
+              </button>
+              <input
+                type="range"
+                className="seek-bar"
+                min={0}
+                max={activeTrackId === 'original' ? duration : 0}
+                step={0.1}
+                value={activeTrackId === 'original' ? currentTime : 0}
+                onChange={(e) => handleSeek('original', Number(e.target.value))}
+              />
+              <span className="time-display">
+                {formatTime(activeTrackId === 'original' ? currentTime : 0)}
+                {' / '}
+                {formatTime(activeTrackId === 'original' ? duration : 0)}
+              </span>
+            </div>
+            <div className="speed-section">
+              <span className="speed-label">速度</span>
+              <div className="speed-presets">
+                {SPEED_PRESETS.map((speed) => (
+                  <button
+                    key={speed}
+                    className={`speed-preset-btn${Math.abs(playbackRate - speed) < 0.001 ? ' active' : ''}`}
+                    onClick={() => handleSpeedChange(speed)}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+              <div className="speed-slider-row">
+                <input
+                  type="range"
+                  className="speed-slider"
+                  min={0.5}
+                  max={2.0}
+                  step={0.05}
+                  value={playbackRate}
+                  onChange={(e) => handleSpeedChange(Number(e.target.value))}
+                />
+                <span className="speed-value">{playbackRate.toFixed(2)}x</span>
+              </div>
+              {Math.abs(playbackRate - 1.0) >= 0.001 && hasFile && (
+                <button
+                  className="btn-save-speed"
+                  disabled={isRendering}
+                  onClick={() => saveAtSpeed('original')}
+                >
+                  {isRendering ? '変換中...' : `${playbackRate.toFixed(2)}xで保存`}
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* コントロール */}
           <div className={`console-controls${!hasFile || isProcessing ? ' disabled' : ''}`}>
             <div className="mode-row">
@@ -332,12 +549,64 @@ export default function App() {
           {consoleState === 'completed' && tracks.length > 0 && (
             <div className="results-area">
               <ul className="results-list">
-                {tracks.map((t) => (
-                  <li key={t.name}>
-                    <span className="track-name">{t.name}</span>
-                    <a className="dl-btn" href={t.url} download={t.fileName}>ダウンロード</a>
-                  </li>
-                ))}
+                {tracks.map((t) => {
+                  const trackId = `track-${t.name}`;
+                  const isActive = activeTrackId === trackId;
+                  return (
+                    <li key={t.name} className="track-item">
+                      <div className="track-header">
+                        <span className="track-name">{PART_LABELS[t.name] || t.name}</span>
+                        <div className="track-actions">
+                          <a className="dl-btn" href={t.url} download={t.fileName}>ダウンロード</a>
+                          {Math.abs(playbackRate - 1.0) >= 0.001 && (
+                            <button
+                              className="dl-btn dl-btn-speed"
+                              disabled={isRendering}
+                              onClick={() => saveAtSpeed({ blob: t.blob, name: t.fileName.replace(/\.wav$/, '') })}
+                            >
+                              {playbackRate.toFixed(2)}xでダウンロード
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="track-player">
+                        <audio
+                          ref={(el) => {
+                            if (el) trackAudioRefs.current.set(trackId, el);
+                            else trackAudioRefs.current.delete(trackId);
+                          }}
+                          src={t.url}
+                          preload="metadata"
+                        />
+                        <button
+                          className={`play-btn${isActive && isPlaying ? ' playing' : ''}`}
+                          onClick={() => togglePlayPause(trackId)}
+                          aria-label={isActive && isPlaying ? '一時停止' : '再生'}
+                        >
+                          {isActive && isPlaying ? (
+                            <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                          )}
+                        </button>
+                        <input
+                          type="range"
+                          className="seek-bar"
+                          min={0}
+                          max={isActive ? duration : 0}
+                          step={0.1}
+                          value={isActive ? currentTime : 0}
+                          onChange={(e) => handleSeek(trackId, Number(e.target.value))}
+                        />
+                        <span className="time-display">
+                          {formatTime(isActive ? currentTime : 0)}
+                          {' / '}
+                          {formatTime(isActive ? duration : 0)}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
               <button className="btn-reset" onClick={handleReset}>
                 新しいファイルを処理
